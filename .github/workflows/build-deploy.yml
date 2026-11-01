@@ -61,11 +61,15 @@ jobs:
           SIGNATURE=$(echo -n "$SIGNING_INPUT" | openssl dgst -sha256 -sign /tmp/sa-key.pem | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
           JWT="$SIGNING_INPUT.$SIGNATURE"
 
-          TOKEN=$(curl -s -X POST \
+          RESPONSE=$(curl -s -X POST \
             -H "Content-Type: application/json" \
             -d "{\"jwt\":\"$JWT\"}" \
-            https://iam.api.cloud.yandex.net/iam/v1/tokens \
-            | sed -n 's/.*"iamToken":"\([^"]*\)".*/\1/p')
+            https://iam.api.cloud.yandex.net/iam/v1/tokens)
+
+          echo "IAM API response:"
+          echo "$RESPONSE"
+
+          TOKEN=$(echo "$RESPONSE" | sed -n 's/.*"iamToken":"\([^"]*\)".*/\1/p')
 
           echo "Token length: ${#TOKEN}"
           if [ -z "$TOKEN" ]; then

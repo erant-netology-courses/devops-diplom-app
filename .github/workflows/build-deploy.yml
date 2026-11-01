@@ -46,16 +46,17 @@ jobs:
         run: |
           echo '${{ secrets.YC_SA_KEY_JSON }}' > /tmp/sa-key.json
 
-          # Парсим ключ и подписываем JWT
           SA_ID=$(python3 -c "import json;print(json.load(open('/tmp/sa-key.json'))['service_account_id'])")
           KEY_ID=$(python3 -c "import json;print(json.load(open('/tmp/sa-key.json'))['id'])")
-          PRIVATE_KEY=$(python3 -c "import json;print(json.load(open('/tmp/sa-key.json'))['private_key'])")
-          echo "$PRIVATE_KEY" > /tmp/sa-key.pem
+          python3 -c "import json;print(json.load(open('/tmp/sa-key.json'))['private_key'])" | awk '{gsub(/\\n/,"\n"); print}' > /tmp/sa-key.pem
+
+          echo "Key length: $(wc -c < /tmp/sa-key.pem)"
+          head -1 /tmp/sa-key.pem
 
           NOW=$(date +%s)
           EXP=$((NOW + 3600))
 
-          HEADER=$(echo -n '{"alg":"PS256","typ":"JWT","kid":"'$KEY_ID'"}' | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
+          HEADER=$(echo -n '{"alg":"RS256","typ":"JWT","kid":"'$KEY_ID'"}' | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
           PAYLOAD=$(echo -n '{"aud":"https://iam.api.cloud.yandex.net/iam/v1/tokens","iss":"'$SA_ID'","iat":'$NOW',"exp":'$EXP'}' | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
           SIGNING_INPUT="$HEADER.$PAYLOAD"
           SIGNATURE=$(echo -n "$SIGNING_INPUT" | openssl dgst -sha256 -sign /tmp/sa-key.pem | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
@@ -66,14 +67,10 @@ jobs:
             -d "{\"jwt\":\"$JWT\"}" \
             https://iam.api.cloud.yandex.net/iam/v1/tokens)
 
-          echo "IAM API response:"
-          echo "$RESPONSE"
-
+          echo "IAM API response: $RESPONSE"
           TOKEN=$(echo "$RESPONSE" | sed -n 's/.*"iamToken":"\([^"]*\)".*/\1/p')
-
           echo "Token length: ${#TOKEN}"
           if [ -z "$TOKEN" ]; then
-            echo "ERROR: TOKEN is empty"
             exit 1
           fi
           echo "::add-mask::$TOKEN"

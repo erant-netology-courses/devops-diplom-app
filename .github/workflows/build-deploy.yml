@@ -48,18 +48,24 @@ jobs:
 
           SA_ID=$(python3 -c "import json;print(json.load(open('/tmp/sa-key.json'))['service_account_id'])")
           KEY_ID=$(python3 -c "import json;print(json.load(open('/tmp/sa-key.json'))['id'])")
-          python3 -c "import json;print(json.load(open('/tmp/sa-key.json'))['private_key'])" | awk '{gsub(/\\n/,"\n"); print}' > /tmp/sa-key.pem
-
-          echo "Key length: $(wc -c < /tmp/sa-key.pem)"
-          head -1 /tmp/sa-key.pem
+          python3 -c "
+import json
+key = json.load(open('/tmp/sa-key.json'))['private_key']
+open('/tmp/sa-key.pem', 'w').write(key)
+"
 
           NOW=$(date +%s)
           EXP=$((NOW + 3600))
 
-          HEADER=$(echo -n '{"alg":"RS256","typ":"JWT","kid":"'$KEY_ID'"}' | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
+          HEADER=$(echo -n '{"alg":"PS256","typ":"JWT","kid":"'$KEY_ID'"}' | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
           PAYLOAD=$(echo -n '{"aud":"https://iam.api.cloud.yandex.net/iam/v1/tokens","iss":"'$SA_ID'","iat":'$NOW',"exp":'$EXP'}' | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
           SIGNING_INPUT="$HEADER.$PAYLOAD"
-          SIGNATURE=$(echo -n "$SIGNING_INPUT" | openssl dgst -sha256 -sign /tmp/sa-key.pem | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
+
+          # PS256 = RSASSA-PSS с SHA-256 и солью = 32 байта
+          SIGNATURE=$(echo -n "$SIGNING_INPUT" | openssl dgst -sha256 -sign /tmp/sa-key.pem \
+            -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:32 \
+            | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
+
           JWT="$SIGNING_INPUT.$SIGNATURE"
 
           RESPONSE=$(curl -s -X POST \

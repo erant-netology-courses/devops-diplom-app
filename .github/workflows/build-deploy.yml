@@ -1,0 +1,84 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+
+env:
+  IMAGE_NAME: app
+  REGISTRY: cr.yandex/crpbh886l52fb3a06g63
+  K8S_NAMESPACE: default
+  K8S_DEPLOYMENT: diplom-app
+
+jobs:
+  build-and-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine image tag
+        id: meta
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="sha-${GITHUB_SHA::7}"
+          fi
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+
+      - name: Login to YCR
+        run: |
+          echo '${{ secrets.YC_SA_KEY_JSON }}' > /tmp/sa-key.json
+          TOKEN=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -d @/tmp/sa-key.json \
+            https://iam.api.cloud.yandex.net/iam/v1/tokens | jq -r .iamToken)
+          echo "::add-mask::$TOKEN"
+          echo "$TOKEN" | docker login --username iam --password-stdin cr.yandex
+
+      - name: Build image
+        run: |
+          docker build -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }} .
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }} \
+                     ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+      - name: Push image
+        run: |
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+  deploy:
+    name: Deploy to Kubernetes
+    needs: build-and-push
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup kubectl
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+          curl -LO "https://dl.k8s.io/release/v1.30.4/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+          kubectl version --client
+
+      - name: Update deployment image
+        run: |
+          kubectl set image deployment/${{ env.K8S_DEPLOYMENT }} \
+            app=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }} \
+            -n ${{ env.K8S_NAMESPACE }} \
+            --insecure-skip-tls-verify
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/${{ env.K8S_DEPLOYMENT }} \
+            -n ${{ env.K8S_NAMESPACE }} \
+            --timeout=180s \
+            --insecure-skip-tls-verify

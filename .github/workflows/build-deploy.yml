@@ -49,10 +49,10 @@ jobs:
           SA_ID=$(python3 -c "import json;print(json.load(open('/tmp/sa-key.json'))['service_account_id'])")
           KEY_ID=$(python3 -c "import json;print(json.load(open('/tmp/sa-key.json'))['id'])")
           python3 -c "
-import json
-key = json.load(open('/tmp/sa-key.json'))['private_key']
-open('/tmp/sa-key.pem', 'w').write(key)
-"
+          import json
+          key = json.load(open('/tmp/sa-key.json'))['private_key']
+          open('/tmp/sa-key.pem', 'w').write(key)
+          "
 
           NOW=$(date +%s)
           EXP=$((NOW + 3600))

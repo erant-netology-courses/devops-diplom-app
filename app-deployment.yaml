@@ -18,6 +18,11 @@ spec:
           image: cr.yandex/crpbh886l52fb3a06g63/app:v1.0.0
           ports:
             - containerPort: 80
+    spec:
+      imagePullSecrets:
+        - name: ycr-pull-secret
+      containers:
+        - name: app
 ---
 apiVersion: v1
 kind: Service
